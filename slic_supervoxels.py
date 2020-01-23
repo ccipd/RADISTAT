@@ -5,17 +5,18 @@ import numpy as np
 from scipy import stats
 
 # --- PARAMETERS ---
-# Threshold of displacement of centroids -- k-means will stop of mean displacement is below this value
+# Threshold of displacement of centroids
+# -- k-means will stop of mean displacement is below this value
 EPSILON = 1e-3
 
-LAMBDA = np.ones(4)
+LAMBDA = np.ones(4)  # Defines how to weight each vector
 
 # Maximum number of iterations used in k-means clustering
 MAX_ITER = 100
 
 
 def slic(
-        feats: np.ndarray, vol_mask: np.ndarray, seed_dist: Tuple, min_voxels: int
+    feats: np.ndarray, vol_mask: np.ndarray, seed_dist: Tuple, min_voxels: int
 ) -> Tuple[list, list, np.ndarray]:
     """Generate superpixel clusters based on feature vectors.
 
@@ -28,10 +29,10 @@ def slic(
     `vol_mask` : An R x C feats D volume matrix filled with zeroes
     everywhere except the region of interest, which is filled with ones
 
-    `seed_dist` : A list of size 3, indicating distances between the initial centroids
-    of supervoxels.
-    As an example, `(3,2,5)` indicates that the centroids should be 3 row, 2 column,
-    and 5 depth units away from each other.
+    `seed_dist` : A list of size 3, indicating distances between the initial
+    centroids of supervoxels.
+    As an example, `(3,2,5)` indicates that the centroids should be 3 row,
+    2 column, and 5 depth units away from each other.
 
     `min_voxels` : The minimum number of voxels in a supervoxel
 
@@ -51,7 +52,8 @@ def slic(
     # Extract row, col, and depth from the volume mask
     r, c, d = vol_mask.shape[:3]
     rg, cg, dg = np.meshgrid(
-        range(1, r, seed_dist[0]), range(1, c, seed_dist[1]), range(1, d, seed_dist[2]))
+        range(1, r, seed_dist[0]), range(1, c, seed_dist[1]), range(1, d, seed_dist[2])
+    )
     # Filter against region of interest
     rg = rg[vol_mask[:] > 0]
     cg = cg[vol_mask[:] > 0]
@@ -68,7 +70,7 @@ def slic(
     feats = stats.zscore(feats, axis=0, ddof=1)
 
     # Used to determine which seed a pixel is assigned to
-    x_hat = np.concatenate((np.transpose(s), feats), axis=1)
+    feats_total = np.concatenate((np.transpose(s), feats), axis=1)
 
     w = np.array([1, 1 / r, 1 / c, 1 / d]) * LAMBDA
 
@@ -77,16 +79,16 @@ def slic(
     c0, r0, d0 = np.meshgrid(
         np.arange(1, c, seed_dist[1]),
         np.arange(1, r, seed_dist[0]),
-        np.arange(1, d, seed_dist[2])
+        np.arange(1, d, seed_dist[2]),
     )
     centroids = np.array([r0[:], c0[:], d0[:]])
     if centroids.size == 0:
         raise Exception("Bad seed step size. No centroids to initialize.")
 
     # Initialize clusters: Each centroid gets its own cluster initially
-    clusters = np.zeros(np.shape(centroids)[0], np.shape(x_hat)[1]) # Stores values for each cluster
-    num_clusters = np.shape(clusters)[0]
-    cluster_isolated = np.full(np.shape(centroids)[0], False)
+    # Stores values for each cluster
+    clusters = np.zeros(len(centroids), np.shape(feats_total)[1])
+    cluster_isolated = np.full(len(centroids), False)
 
     for k, centroid in enumerate(centroids):
         # Find neighboring points for each centroid
@@ -97,18 +99,26 @@ def slic(
             cluster_isolated[k] = True
         else:
             # Assign value to each cluster
-            nh_feats = x_hat[neighbor_idxs,:]
-            clusters[k,:] = np.mean(nh_feats, axis=0)
+            nh_feats = feats_total[neighbor_idxs, :]
+            clusters[k, :] = np.mean(nh_feats, axis=0)
+    # Remove all isolated clusters
     clusters = [c for i, c in enumerate(clusters) if not cluster_isolated[i]]
 
-    # TODO Write k-means
-    # TODO Implement nearest neighbor
+    for _ in range(MAX_ITER):
+        # Distance matrix
+        dist_ik = np.full(len(feats), len(centroids), np.infty)
 
+        # Compute feature distances in each neighbor
+        cluster_isolated = np.full(len(centroids), False)
+        for k, centroid in enumerate(centroids):
+            neighbor_idxs = nearest_neighbors(centroid, centroids, seed_dist)
+            nh_feats = feats_total[neighbor_idxs, :]
+            # Calculate feature distance between center and neighbors
+            delta = nh_feats - np.tile(centroid, [len(nh_feats), 1])
+            delta = delta * np.tile(w, [len(delta), 1])
 
-def kmeans():
-    """
-    Compute k-means over a set of initial clusters
-    """
+            # Fill distance matrix with squared values
+            dist_ik[neighbor_idxs, k] = np.sum(delta**2, 1)
 
 
 def nearest_neighbors(center: np.ndarray, points: np.ndarray, step: Tuple) -> list:
@@ -127,15 +137,18 @@ def nearest_neighbors(center: np.ndarray, points: np.ndarray, step: Tuple) -> li
 
     # Check that dimensions match
     if np.shape(points)[1] != np.shape(center)[0]:
-        sys.stderr.write("nearestneighbors: warning: Dimension mismatch. Returning empty list.")
+        sys.stderr.write(
+            "nearestneighbors: warning: Dimension mismatch. Returning empty list."
+        )
         return []
 
-    # TODO write lambda for if point is within step of center
-    point_near_center = lambda p: all([center[i] - p[i] <= step[i] for i in range(len(step))])
-    
     # Return all points within step size of center
-    return [idx for idx, point in enumerate(points) if point_near_center(point)]
-    
+    return [
+        idx
+        for idx, pt in enumerate(points)
+        if all([center[i] - pt[i] <= step[i] for i in range(len(step))])
+    ]
+
 
 def rankindex_array(a: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
