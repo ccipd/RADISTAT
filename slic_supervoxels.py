@@ -1,8 +1,10 @@
+import math
 import sys
 from typing import Tuple
 
 import numpy as np
 from scipy import stats
+from skimage import measure
 
 # --- PARAMETERS ---
 # Threshold of displacement of centroids
@@ -44,9 +46,10 @@ def slic(
     * An M x 1 column vector, where the mth vector indicates the label of
       supervoxel m, a number from 1 to K.
     * A K x (P + |S|) matrix, where the kth row is the feature vector of
-      the kth centroid.
+      the kth centroid (including spatial features).
     * An R x C x D volume matrix, where each element indicates the ID
       of the supervoxel that voxel belongs to.
+        ( TODO: This can be reconstructed from the other two. )
     """
 
     # Extract row, col, and depth from the volume mask
@@ -75,7 +78,7 @@ def slic(
     w = np.array([1, 1 / r, 1 / c, 1 / d]) * LAMBDA
 
     # Create initial centroids
-    print("Creating initial seeds...")
+    sys.stderr.write("Creating initial seeds...\n")
     c0, r0, d0 = np.meshgrid(
         np.arange(1, c, seed_dist[1]),
         np.arange(1, r, seed_dist[0]),
@@ -88,7 +91,7 @@ def slic(
     # Initialize clusters: Each centroid gets its own cluster initially
     # Stores values for each cluster
     clusters = np.zeros(len(centroids), np.shape(feats_total)[1])
-    cluster_isolated = np.full(len(centroids), False)
+    cluster_isolated = [False for _ in range(len(clusters))]
 
     for k, centroid in enumerate(centroids):
         # Find neighboring points for each centroid
@@ -104,12 +107,17 @@ def slic(
     # Remove all isolated clusters
     clusters = [c for i, c in enumerate(clusters) if not cluster_isolated[i]]
 
+    # ---- ITERATIVE K-MEANS CLUSTERING ----
+    ctr_displacement = np.infty
     for _ in range(MAX_ITER):
-        # Distance matrix
-        dist_ik = np.full(len(feats), len(centroids), np.infty)
+        # Stop if centroid displacement is small enough
+        if ctr_displacement < EPSILON:
+            break
 
-        # Compute feature distances in each neighbor
-        cluster_isolated = np.full(len(centroids), False)
+        # Distance matrix
+        dist_ik = np.full((len(feats), len(centroids)), np.infty)
+
+        # Compute feature distances from each neighbor to its centroid
         for k, centroid in enumerate(centroids):
             neighbor_idxs = nearest_neighbors(centroid, centroids, seed_dist)
             nh_feats = feats_total[neighbor_idxs, :]
@@ -118,21 +126,58 @@ def slic(
             delta = delta * np.tile(w, [len(delta), 1])
 
             # Fill distance matrix with squared values
-            dist_ik[neighbor_idxs, k] = np.sum(delta**2, 1)
+            dist_ik[neighbor_idxs, k] = np.sum(delta ** 2, axis=1)
+
+        # Assign center indices to each voxel
+        # ctr_idxs[i] = X means that voxel i belongs to center X
+        dist_min, ctr_idxs = np.min(dist_ik, axis=1), np.argmin(dist_ik, axis=1)
+
+        # There may still be isolated voxels at this point, e.g. if centers
+        # move away from other voxels.
+        isolated_idxs = np.transpose(np.nonzero(dist_min[dist_min == np.infty]))
+        if np.any(isolated_idxs):
+            for idx in isolated_idxs:
+                # Calculate distance to closest centroid, using only spatial coords
+                delta = np.tile(feats_total[idx, -3:], len(clusters)) - clusters[:, -3:]
+                new_center = np.min(np.sum(delta**2, axis=1), axis=0)
+                ctr_idxs[idx] = new_center
+
+        # Check for isolated/unused/duplicate center indices and clean up
+        uniq_ctr_idx = np.unique(ctr_idxs)
+        clusters = clusters[uniq_ctr_idx,:]
+        dist_ik = dist_ik[:, uniq_ctr_idx]
+
+        # Sanity check: No isolated centers should remain
+        assert np.setdiff1d(uniq_ctr_idx, list(range(len(clusters)))) == []
+
+        clusters_old = clusters
+
+        # Update alive centers
+        ctr_idxs = rankindex_array(ctr_idxs)
+        for k in range(len(clusters)):
+            clusters[k, :] = np.mean(feats_total[ctr_idxs == k, :], axis=0)
+
+        # Displace & calculate displacements
+        cluster_displacement = clusters[:, -3:-1] - clusters_old[:, -3:-1]
+        ctr_displacement = np.mean(math.sqrt(np.sum(cluster_displacement ** 2)), axis=1)
+
+    # At this point, there may be some voxels that are still isolated
+    # TODO Split non-contiguous regions into new clusters
+
 
 
 def nearest_neighbors(center: np.ndarray, points: np.ndarray, step: Tuple) -> list:
     """
-    Compute the nearest neighbors to a given center from candidate points.
+    Compute the spatially nearest neighbors to a given center from candidate points.
 
     Parameters
     ----------
-    `center` : The point for which to find neighbors
+    center : The point for which to find neighbors
 
-    `points` : Candidate points over which to search for neighbors to `center`
+    points : Candidate points over which to search for neighbors to `center`
 
-    `step` : Maximum distance between candidate neighbor and `center`, in the form of a tuple
-    containing (row, column, depth) distances
+    step : Maximum distance between candidate neighbor and `center`, in the form of
+    a tuple containing (row, column, depth) distances
     """
 
     # Check that dimensions match
