@@ -162,9 +162,11 @@ def slic(
         ctr_displacement = np.mean(math.sqrt(np.sum(cluster_displacement ** 2)), axis=1)
 
     # At this point, there may be some voxels that are still isolated
-    # TODO Split non-contiguous regions into new clusters
-
-
+    # Split non-contiguous regions into new clusters
+    # skimage.measure.label should do this by relabeling contiguous regions
+    vol_supx = np.zeros(vol_mask.shape)
+    vol_supx[vol_mask > 0] = ctr_idxs
+    labels = measure.label(vol_supx)
 
 def nearest_neighbors(center: np.ndarray, points: np.ndarray, step: Tuple) -> list:
     """
@@ -183,7 +185,7 @@ def nearest_neighbors(center: np.ndarray, points: np.ndarray, step: Tuple) -> li
     # Check that dimensions match
     if np.shape(points)[1] != np.shape(center)[0]:
         sys.stderr.write(
-            "nearestneighbors: warning: Dimension mismatch. Returning empty list."
+            "nearest_neighbors: warning: Dimension mismatch. Returning empty list."
         )
         return []
 
