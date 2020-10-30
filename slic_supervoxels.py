@@ -53,10 +53,9 @@ def slic(
     """
 
     # Extract row, col, and depth from the volume mask
-    r, c, d = vol_mask.shape[:3]
-    rg, cg, dg = np.meshgrid(
-        range(1, r, seed_dist[0]), range(1, c, seed_dist[1]), range(1, d, seed_dist[2])
-    )
+    r, c, d = vol_mask.shape
+    # TODO why are c and r switched in the MATLAB codebase?
+    rg, cg, dg = np.meshgrid(range(r), range(c), range(d))
     # Filter against region of interest
     rg = rg[vol_mask[:] > 0]
     cg = cg[vol_mask[:] > 0]
@@ -64,48 +63,64 @@ def slic(
 
     # Don't need to z-score spatial coords
     # s is 3-column matrix with (row, col, depth) points in each row
-    s = np.array([rg, cg, dg])
-    smax = np.ndarray.max(s, axis=0)
-    smin = np.ndarray.min(s, axis=0)
+    s = np.array([rg, cg, dg]).transpose()
+    # Two corners of "cube" surrounding mask
+    smax = s.max(axis=0)
+    smin = s.min(axis=0)
 
     # Z-score radiomic features
-    m, p = feats.shape
+    m, _ = feats.shape
     feats = stats.zscore(feats, axis=0, ddof=1)
 
     # Used to determine which seed a pixel is assigned to
-    feats_total = np.concatenate((np.transpose(s), feats), axis=1)
+    # Each row is a voxel's radiomic and spatial features
+    feats_total = np.concatenate((feats, s), axis=1)
 
     w = np.array([1, 1 / r, 1 / c, 1 / d]) * LAMBDA
 
     # Create initial centroids
-    sys.stderr.write("Creating initial seeds...\n")
-    c0, r0, d0 = np.meshgrid(
-        np.arange(1, c, seed_dist[1]),
-        np.arange(1, r, seed_dist[0]),
-        np.arange(1, d, seed_dist[2]),
+    sys.stderr.write("Computing superpixel clusters...\n")
+    r0, c0, d0 = np.meshgrid(
+        np.arange(0, r, seed_dist[0]),
+        np.arange(0, c, seed_dist[1]),
+        np.arange(0, d, seed_dist[2]),
     )
-    centroids = np.array([r0[:], c0[:], d0[:]])
-    if centroids.size == 0:
+    grid_shape = r0.shape
+    # Initial list of pixels
+    s0 = np.array(
+        [
+            [r0[x, y, z], c0[x, y, z], d0[x, y, z]]
+            for x in range(grid_shape[0])
+            for y in range(grid_shape[1])
+            for z in range(grid_shape[2])
+        ]
+    )
+    # Trim intitial pixels to masked volume
+    for i in range(len(r0.shape)):
+        s0 = s0[s0[:, i] >= smin[i]]
+        s0 = s0[s0[:, i] <= smax[i]]
+
+    if s0.size == 0:
         raise Exception("Bad seed step size. No centroids to initialize.")
 
     # Initialize clusters: Each centroid gets its own cluster initially
     # Stores values for each cluster
-    clusters = np.zeros(len(centroids), np.shape(feats_total)[1])
-    cluster_isolated = [False for _ in range(len(clusters))]
+    centers = np.zeros((s0.shape[0], feats_total.shape[1]))
+    centers_isolated = [False for _ in range(len(centers))]
 
-    for k, centroid in enumerate(centroids):
+    for k, center in enumerate(s0):
         # Find neighboring points for each centroid
-        neighbor_idxs = nearest_neighbors(centroid, centroids, seed_dist)
+        neighbor_idxs = nearest_neighbors(center, s, seed_dist)
 
         # If cluster has no neighbor, mark as isolated
         if len(neighbor_idxs) == 0:
-            cluster_isolated[k] = True
+            centers_isolated[k] = True
         else:
-            # Assign value to each cluster
+            # Assign mean feature value to each cluster
             nh_feats = feats_total[neighbor_idxs, :]
-            clusters[k, :] = np.mean(nh_feats, axis=0)
+            centers[k, :] = np.mean(nh_feats, axis=0)
     # Remove all isolated clusters
-    clusters = [c for i, c in enumerate(clusters) if not cluster_isolated[i]]
+    centers = np.array([c for i, c in enumerate(centers) if not centers_isolated[i]])
 
     # ---- ITERATIVE K-MEANS CLUSTERING ----
     ctr_displacement = np.infty
@@ -114,52 +129,56 @@ def slic(
         if ctr_displacement < EPSILON:
             break
 
-        # Distance matrix
-        dist_ik = np.full((len(feats), len(centroids)), np.infty)
+        # Distance matrix from each voxel to each centroid
+        dist_ik = np.full((len(feats), len(centers)), np.infty)
 
         # Compute feature distances from each neighbor to its centroid
-        for k, centroid in enumerate(centroids):
-            neighbor_idxs = nearest_neighbors(centroid, centroids, seed_dist)
+        for k, center in enumerate(centers):
+            neighbor_idxs = nearest_neighbors(center[-3:], s, seed_dist)
             nh_feats = feats_total[neighbor_idxs, :]
             # Calculate feature distance between center and neighbors
-            delta = nh_feats - np.tile(centroid, [len(nh_feats), 1])
+            delta = nh_feats - np.tile(center, [len(nh_feats), 1])
             delta = delta * np.tile(w, [len(delta), 1])
 
-            # Fill distance matrix with squared values
+            # Fill distance matrix with squared-distances
             dist_ik[neighbor_idxs, k] = np.sum(delta ** 2, axis=1)
 
         # Assign center indices to each voxel
         # ctr_idxs[i] = X means that voxel i belongs to center X
+        # with a minimum feature distance of dist_min[i]
         dist_min, ctr_idxs = np.min(dist_ik, axis=1), np.argmin(dist_ik, axis=1)
 
         # There may still be isolated voxels at this point, e.g. if centers
         # move away from other voxels.
-        isolated_idxs = np.transpose(np.nonzero(dist_min[dist_min == np.infty]))
-        if np.any(isolated_idxs):
+        isolated_idxs = np.where(dist_min == np.infty)[0]
+        if isolated_idxs.size > 0:
             for idx in isolated_idxs:
                 # Calculate distance to closest centroid, using only spatial coords
-                delta = np.tile(feats_total[idx, -3:], len(clusters)) - clusters[:, -3:]
-                new_center = np.min(np.sum(delta ** 2, axis=1), axis=0)
+                delta = np.tile(feats_total[idx, -3:], (centers.shape[0], 1)) - centers[:, -3:]
+                new_center = np.argmin(np.sum(delta ** 2, axis=1), axis=0)
                 ctr_idxs[idx] = new_center
 
         # Check for isolated/unused/duplicate center indices and clean up
         uniq_ctr_idx = np.unique(ctr_idxs)
-        clusters = clusters[uniq_ctr_idx, :]
+        centers = centers[uniq_ctr_idx, :]
         dist_ik = dist_ik[:, uniq_ctr_idx]
 
         # Sanity check: No isolated centers should remain
-        assert np.setdiff1d(uniq_ctr_idx, list(range(len(clusters)))).size == 0
+        dist_min, ctr_idxs = np.min(dist_ik, axis=1), np.argmin(dist_ik, axis=1)
+        uniq_ctr_idx = np.unique(ctr_idxs)
+        assert np.setdiff1d(uniq_ctr_idx, range(len(centers))).size == 0
 
-        clusters_old = clusters
+        centers_old = np.copy(centers)
 
-        # Update alive centers
+        # Update candidate centers to mean feature values
         ctr_idxs, _ = rankindex_array(ctr_idxs)
-        for k in range(len(clusters)):
-            clusters[k, :] = np.mean(feats_total[ctr_idxs == k, :], axis=0)
+        for k in range(len(centers)):
+            centers[k, :] = np.mean(feats_total[ctr_idxs == k, :], axis=0)
 
         # Displace & calculate displacements
-        cluster_displacement = clusters[:, -3:-1] - clusters_old[:, -3:-1]
-        ctr_displacement = np.mean(math.sqrt(np.sum(cluster_displacement ** 2)), axis=1)
+        # Total displacement is the mean Euclidean distance between old and new centers
+        cluster_displacement = centers[:, -3:] - centers_old[:, -3:]
+        ctr_displacement = np.mean(np.sqrt(np.sum(cluster_displacement ** 2, axis=1)))
 
     # At this point, there may be some voxels that are still isolated
     # Split non-contiguous regions into new clusters
@@ -171,38 +190,48 @@ def slic(
 
     # Check for regions that are too small, i.e. under num_min_voxels
     small_regions = [
-        i for i in range(len(num_labels) + 1) if (labels == i).sum < min_voxels
+        i for i in range(num_labels) if (labels == i).sum() < min_voxels
     ]
     # Each element in small_regions is an index of a small region
-    # We need to reassign these to neighboring voxels
+    # We need to reassign these to neighboring clusters
     for region_index in small_regions:
-        isol_voxels = s[labels == region_index, :]
+        isol_voxels = np.argwhere(labels == region_index)
 
         # Get the union of all neighbors of the small regions
         isol_neighbors = np.array([])
         for voxel in isol_voxels:
-            isol_neighbors = np.union1d(isol_neighbors, nearest_neighbors(voxel, s, (1, 1, 1)))
+            isol_neighbors = np.append(
+                isol_neighbors, nearest_neighbors(voxel, s, (1, 1, 1)), axis=0
+            )
 
-        isol_neighbors = np.setdiff1d(isol_neighbors, np.nonzero(labels == region_index))
+        isol_neighbors = np.setdiff1d(
+            isol_neighbors, np.nonzero(labels == region_index)
+        )
+        if not isol_neighbors:
+            continue
         nh_candidates = labels[isol_neighbors]
         # Filter on neighborhoods that are big enough
-        idx_valid_nh = [i for i, n in enumerate(nh_candidates) if (labels == n).sum >= min_voxels - len(isol_voxels)]
+        idx_valid_nh = [
+            i
+            for i, n in enumerate(nh_candidates)
+            if (labels == n).sum() >= min_voxels - len(isol_voxels)
+        ]
         new_nh = 0
         if idx_valid_nh:
-            # Assign to the most frequently occuring neighbor
+            # Assign to the most frequently occurring neighbor
             new_nh = np.argmax(np.bincount(nh_candidates[idx_valid_nh]))
         else:
             new_nh = np.argmax(np.bincount(nh_candidates))
 
-    supervoxel_ids = rankindex_array(labels)
+    supervoxel_ids, supervoxel_vals = rankindex_array(labels)
     vol_supervoxel = np.zeros(np.shape(vol_mask))
-    vol_supervoxel[vol_mask > 0] = supervoxel_ids
+    vol_supervoxel[vol_mask > 0] = supervoxel_ids[vol_mask > 0]
     supervoxel_id_list = np.unique(supervoxel_ids[:])
     # Calculate centers in feature space
-    vk = np.zeros(len(supervoxel_id_list), np.shape(feats_total)[1])
-    supervoxel_size = np.zeros(len(supervoxel_id_list)) # no. of voxels in supervoxel
+    vk = np.zeros((len(supervoxel_id_list), np.shape(feats_total)[1]))
+    supervoxel_size = np.zeros(len(supervoxel_id_list))  # no. of voxels in supervoxel
     for i in range(len(supervoxel_id_list)):
-        vk[i, :] = np.mean(feats_total[supervoxel_ids == i, :], axis=0)
+        vk[i] = np.mean(feats_total[supervoxel_ids[vol_mask > 0] == i, :], axis=0)
         supervoxel_size[i] = (supervoxel_ids == i).sum()
 
     return supervoxel_ids, vk, vol_supervoxel
@@ -237,7 +266,7 @@ def nearest_neighbors(center: np.ndarray, points: np.ndarray, step: Tuple) -> li
     return [
         idx
         for idx, pt in enumerate(points)
-        if all([center[i] - pt[i] <= step[i] for i in range(len(step))])
+        if all([abs(center[i] - pt[i]) <= step[i] for i in range(len(step))])
     ]
 
 
