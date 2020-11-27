@@ -110,3 +110,9 @@ def radistat(
         cluster_idxs = [i for i in range(cluster_vals.shape[0])
                         if cluster_vals[i] <= thresh and expression_vals[i] == 0]
         expression_vals[cluster_idxs] = (idx + 1)/(len(threshold_vals) + 1)
+    # At this point, the remaining zeros in expresion_vals should go in the last bin
+    expression_vals[expression_vals == 0] = 1
+
+    # Create feature volume out of expression levels
+    feat_vol = np.zeros(np.shape(mask))
+    feat_vol[mask == 1] = expression_vals
