@@ -3,6 +3,7 @@ import sys
 from typing import Tuple
 
 import numpy as np
+from numpy import ndarray
 from scipy import stats
 from skimage import measure
 
@@ -18,8 +19,8 @@ MAX_ITER = 100
 
 
 def slic(
-    feats: np.ndarray, vol_mask: np.ndarray, seed_dist: Tuple, min_voxels: int
-) -> Tuple[list, list, np.ndarray]:
+    feats: ndarray, vol_mask: ndarray, seed_dist: Tuple, min_voxels: int
+) -> Tuple[ndarray, ndarray, ndarray]:
     """Generate superpixel clusters based on feature vectors.
 
     Parameters

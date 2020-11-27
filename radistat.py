@@ -1,7 +1,7 @@
 from slic_supervoxels import slic
 
 import numpy as np
-
+import sys
 
 class RadistatResult:
     """Data class holding the result of a call to the RADISTAT function.
@@ -15,15 +15,15 @@ class RadistatResult:
 
 
 def radistat(
-    img: np.ndarray,
-    mask: np.ndarray,
-    feat_map: np.ndarray,
-    window_size: int = 5,
-    num_min_voxels: int = 5,
-    texture_metric: str = "prop",
-    spatial_metric: str = "adjacency",
-    threshold_pctiles: list = [33, 67],
-    view: bool = False,
+        img: np.ndarray,
+        mask: np.ndarray,
+        feat_map: np.ndarray,
+        window_size: int = 5,
+        num_min_voxels: int = 5,
+        texture_metric: str = "prop",
+        spatial_metric: str = "adjacency",
+        threshold_pctiles: list = [33, 67],
+        view: bool = False,
 ) -> RadistatResult:
     """
     Compute the RADISTAT feature descriptor for a given image and feature.
@@ -83,10 +83,11 @@ def radistat(
     # If image is 2D, tile the array so it's 3D
     vol_supervoxel: np.ndarray
     if len(img.shape) == 2:
-        step = [window_size, window_size, 1]
+        step = (window_size, window_size, 1)
         _, _, vol_supervoxel = slic(
-            np.tile(feat_vals, (1, 2)).transpose(), np.tile(mask, (2, 1, 1)).transpose(1, 2, 0), step, num_min_voxels
+            np.tile(feat_vals, (1, 2)).transpose(), np.tile(mask, (2, 1, 1)).transpose((1, 2, 0)), step, num_min_voxels
         )
+        vol_supervoxel = vol_supervoxel[:,:,0]
     else:
         step = [window_size, window_size, window_size]
         _, _, vol_supervoxel = slic(feat_map, mask, step, num_min_voxels)
@@ -94,11 +95,18 @@ def radistat(
     labeled_voxels = vol_supervoxel[mask > 0]
     # Fill each cluster with mean of all voxels in that cluster
     cluster_vals = np.zeros(np.shape(feat_vals))
-    supervoxel_labels = np.unique(labeled_voxels)
-    for label in supervoxel_labels:
+    all_labels = np.unique(labeled_voxels)
+    for label in all_labels:
         cluster_vals[labeled_voxels == label] = np.mean(
             feat_vals[labeled_voxels == label]
         )
 
     # Bin clusters based on RADISTAT expression value thresholds
-    threshold_vals = map(lambda p: np.percentile(feat_vals, p), threshold_pctiles)
+    sys.stderr.write("Partitioning clusters into expression levels...\n")
+    expression_vals = np.zeros(np.shape(cluster_vals))
+    threshold_vals = [np.percentile(feat_vals, p) for p in threshold_pctiles]
+    for idx, thresh in enumerate(threshold_vals):
+        # Indices of unassigned clusters below current thresh
+        cluster_idxs = [i for i in range(cluster_vals.shape[0])
+                        if cluster_vals[i] <= thresh and expression_vals[i] == 0]
+        expression_vals[cluster_idxs] = (idx + 1)/(len(threshold_vals) + 1)
