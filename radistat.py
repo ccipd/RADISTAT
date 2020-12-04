@@ -1,7 +1,9 @@
+from build_metrics import build_texture_vec
 from slic_supervoxels import slic
 
 import numpy as np
 import sys
+
 
 class RadistatResult:
     """Data class holding the result of a call to the RADISTAT function.
@@ -25,8 +27,7 @@ def radistat(
         threshold_pctiles: list = [33, 67],
         view: bool = False,
 ) -> RadistatResult:
-    """
-    Compute the RADISTAT feature descriptor for a given image and feature.
+    """Compute the RADISTAT feature descriptor for a given image and feature.
 
     The current implementation only allows for 3 bins,
     thresholding at the 33rd and 67th percentiles.
@@ -34,38 +35,35 @@ def radistat(
     Parameters
     ----------
 
-    img :
-    M x N x S array containing the image from which feature values were extracted
+    img : array-like
+        M x N x S array containing the image from which feature values were extracted
 
-    mask :
-    M x N x S array corresponding to the label on `img` within with feature values were extracted.
-    0 everywhere except the region of interest.
+    mask : array-like
+        M x N x S array corresponding to the label on `img` within with feature values were extracted.
+        0 everywhere except the region of interest.
 
-    feat_map :
-    M x N x S matrix containing representative feature values for each nonzero pixel in the mask ROI.
+    feat_map : array-like
+        M x N x S matrix containing representative feature values for each nonzero pixel in the mask ROI.
 
-    opts :
-    A `RadistatOptions` struct containing options. See the `RadistatOptions` class for available options.
+    window_size : int
+        Distance between supervoxels.
 
-    window_size:
-    Distance between supervoxels.
+    num_min_voxels : int
+        Minimum number of voxels in a supervoxel cluster.
 
-    num_min_voxels:
-    Minimum number of voxels in a supervoxel cluster.
+    texture_metric : str
+        Which texture metric to be computed. One of ['prop', 'propratio', 'wghtprop'].
 
-    texture_metric:
-    Which texture metric to be computed. One of ['prop', 'propratio', 'wghtprop'].
+    spatial_metric : str
+        Which spatial_metric to be used. One of ['adjacency'].
 
-    spatial_metric:
-    Which spatial_metric to be used. One of ['adjacency'].
+    threshold_pctiles : list[str]
+        List of percentiles, between 0 and 100 inclusive, at which to threshold each bin.
+        For example, [33, 67] will produce 3 bins of expression values,
+        separated at the 33rd and 67th percentiles.
 
-    threshold_pctiles:
-    List of percentiles, between 0 and 100 inclusive, at which to threshold each bin.
-    For example, [33, 67] will produce 3 bins of expression values,
-    separated at the 33rd and 67th percentiles.
-
-    view:
-    Whether or not to plot results.
+    view : bool
+        Whether or not to plot results.
     """
 
     ## Validate inputs
@@ -87,9 +85,9 @@ def radistat(
         _, _, vol_supervoxel = slic(
             np.tile(feat_vals, (1, 2)).transpose(), np.tile(mask, (2, 1, 1)).transpose((1, 2, 0)), step, num_min_voxels
         )
-        vol_supervoxel = vol_supervoxel[:,:,0]
+        vol_supervoxel = vol_supervoxel[:, :, 0]
     else:
-        step = [window_size, window_size, window_size]
+        step = (window_size, window_size, window_size)
         _, _, vol_supervoxel = slic(feat_map, mask, step, num_min_voxels)
 
     labeled_voxels = vol_supervoxel[mask > 0]
@@ -109,10 +107,14 @@ def radistat(
         # Indices of unassigned clusters below current thresh
         cluster_idxs = [i for i in range(cluster_vals.shape[0])
                         if cluster_vals[i] <= thresh and expression_vals[i] == 0]
-        expression_vals[cluster_idxs] = (idx + 1)/(len(threshold_vals) + 1)
+        expression_vals[cluster_idxs] = (idx + 1) / (len(threshold_vals) + 1)
     # At this point, the remaining zeros in expresion_vals should go in the last bin
     expression_vals[expression_vals == 0] = 1
 
     # Create feature volume out of expression levels
     feat_vol = np.zeros(np.shape(mask))
     feat_vol[mask == 1] = expression_vals
+
+    thresholds = np.unique(expression_vals)
+
+    texture_vec = build_texture_vec(feat_vol, thresholds, texture_metric)

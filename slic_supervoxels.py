@@ -19,7 +19,7 @@ MAX_ITER = 100
 
 
 def slic(
-    feats: ndarray, vol_mask: ndarray, seed_dist: Tuple, min_voxels: int
+        feats: ndarray, vol_mask: ndarray, seed_dist: Tuple, min_voxels: int
 ) -> Tuple[ndarray, ndarray, ndarray]:
     """Generate superpixel clusters based on feature vectors.
 
