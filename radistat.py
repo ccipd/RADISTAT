@@ -1,13 +1,15 @@
-from build_metrics import build_texture_vec
-from slic_supervoxels import slic
+from dataclasses import dataclass
+from sys import stderr
 
 import numpy as np
-import sys
+
+from build_metrics import build_texture_vec, build_spatial_vec
+from slic_supervoxels import slic
 
 
+@dataclass
 class RadistatResult:
-    """Data class holding the result of a call to the RADISTAT function.
-    """
+    """Data class holding the result of a call to the RADISTAT function."""
 
     supervoxel_labels: np.ndarray
     cluster_values: np.ndarray
@@ -17,15 +19,14 @@ class RadistatResult:
 
 
 def radistat(
-        img: np.ndarray,
-        mask: np.ndarray,
-        feat_map: np.ndarray,
-        window_size: int = 5,
-        num_min_voxels: int = 5,
-        texture_metric: str = "prop",
-        spatial_metric: str = "adjacency",
-        threshold_pctiles: list = [33, 67],
-        view: bool = False,
+    img: np.ndarray,
+    mask: np.ndarray,
+    feat_map: np.ndarray,
+    window_size: int = 5,
+    num_min_voxels: int = 5,
+    texture_metric: str = "prop",
+    spatial_metric: str = "adjacency",
+    threshold_pctiles: list = [33, 67],
 ) -> RadistatResult:
     """Compute the RADISTAT feature descriptor for a given image and feature.
 
@@ -51,22 +52,19 @@ def radistat(
     num_min_voxels : int
         Minimum number of voxels in a supervoxel cluster.
 
-    texture_metric : str
+    texture_metric : {'prop', 'propratio', 'wghtprop'}
         Which texture metric to be computed. One of ['prop', 'propratio', 'wghtprop'].
 
-    spatial_metric : str
-        Which spatial_metric to be used. One of ['adjacency'].
+    spatial_metric : {'adjacency', 'mst', 'delauney'}
+        Which spatial_metric to be used.
 
     threshold_pctiles : list[str]
         List of percentiles, between 0 and 100 inclusive, at which to threshold each bin.
         For example, [33, 67] will produce 3 bins of expression values,
         separated at the 33rd and 67th percentiles.
-
-    view : bool
-        Whether or not to plot results.
     """
 
-    ## Validate inputs
+    # Validate inputs
     if img.shape != mask.shape or mask.shape != feat_map.shape:
         raise ValueError(
             f"img (shape {img.shape}), mask (shape {mask.shape}),\
@@ -77,13 +75,17 @@ def radistat(
 
     feat_vals = feat_map[mask > 0]
 
-    ## Get superpixels
+    # Get superpixels
+    print("Computing superpixel clusters...\n", file=stderr)
     # If image is 2D, tile the array so it's 3D
     vol_supervoxel: np.ndarray
     if len(img.shape) == 2:
         step = (window_size, window_size, 1)
         _, _, vol_supervoxel = slic(
-            np.tile(feat_vals, (1, 2)).transpose(), np.tile(mask, (2, 1, 1)).transpose((1, 2, 0)), step, num_min_voxels
+            np.tile(feat_vals, (1, 2)).transpose(),
+            np.tile(mask, (2, 1, 1)).transpose((1, 2, 0)),
+            step,
+            num_min_voxels,
         )
         vol_supervoxel = vol_supervoxel[:, :, 0]
     else:
@@ -100,13 +102,16 @@ def radistat(
         )
 
     # Bin clusters based on RADISTAT expression value thresholds
-    sys.stderr.write("Partitioning clusters into expression levels...\n")
+    print("Partitioning clusters into expression levels...\n", file=stderr)
     expression_vals = np.zeros(np.shape(cluster_vals))
     threshold_vals = [np.percentile(feat_vals, p) for p in threshold_pctiles]
     for idx, thresh in enumerate(threshold_vals):
         # Indices of unassigned clusters below current thresh
-        cluster_idxs = [i for i in range(cluster_vals.shape[0])
-                        if cluster_vals[i] <= thresh and expression_vals[i] == 0]
+        cluster_idxs = [
+            i
+            for i in range(cluster_vals.shape[0])
+            if cluster_vals[i] <= thresh and expression_vals[i] == 0
+        ]
         expression_vals[cluster_idxs] = (idx + 1) / (len(threshold_vals) + 1)
     # At this point, the remaining zeros in expresion_vals should go in the last bin
     expression_vals[expression_vals == 0] = 1
@@ -117,4 +122,6 @@ def radistat(
 
     thresholds = np.unique(expression_vals)
 
+    # Calculate the textural and spatial metrics
+    print("Calculating RADISTAT metrics...", file=stderr)
     texture_vec = build_texture_vec(feat_vol, thresholds, texture_metric)

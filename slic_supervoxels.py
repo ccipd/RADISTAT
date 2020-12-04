@@ -1,5 +1,3 @@
-import math
-import sys
 from typing import Tuple
 
 import numpy as np
@@ -19,7 +17,7 @@ MAX_ITER = 100
 
 
 def slic(
-        feats: ndarray, vol_mask: ndarray, seed_dist: Tuple, min_voxels: int
+    feats: ndarray, vol_mask: ndarray, seed_dist: Tuple, min_voxels: int
 ) -> Tuple[ndarray, ndarray, ndarray]:
     """Generate superpixel clusters based on feature vectors.
 
@@ -80,7 +78,6 @@ def slic(
     w = np.array([1, 1 / r, 1 / c, 1 / d]) * LAMBDA
 
     # Create initial centroids
-    sys.stderr.write("Computing superpixel clusters...\n")
     r0, c0, d0 = np.meshgrid(
         np.arange(0, r, seed_dist[0]),
         np.arange(0, c, seed_dist[1]),
@@ -155,7 +152,10 @@ def slic(
         if isolated_idxs.size > 0:
             for idx in isolated_idxs:
                 # Calculate distance to closest centroid, using only spatial coords
-                delta = np.tile(feats_total[idx, -3:], (centers.shape[0], 1)) - centers[:, -3:]
+                delta = (
+                    np.tile(feats_total[idx, -3:], (centers.shape[0], 1))
+                    - centers[:, -3:]
+                )
                 new_center = np.argmin(np.sum(delta ** 2, axis=1), axis=0)
                 ctr_idxs[idx] = new_center
 
@@ -190,9 +190,7 @@ def slic(
     # labels is the input volume clustered (via value) into contiguous regions
 
     # Check for regions that are too small, i.e. under num_min_voxels
-    small_regions = [
-        i for i in range(num_labels) if (labels == i).sum() < min_voxels
-    ]
+    small_regions = [i for i in range(num_labels) if (labels == i).sum() < min_voxels]
     # Each element in small_regions is an index of a small region
     # We need to reassign these to neighboring clusters
     for region_index in small_regions:
