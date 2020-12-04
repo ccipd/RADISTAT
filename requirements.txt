@@ -1,0 +1,5 @@
+jupyter
+scikit-image
+scipy
+SimpleITK
+numpy
