@@ -26,7 +26,7 @@ def radistat(
     num_min_voxels: int = 5,
     texture_metric: str = "prop",
     spatial_metric: str = "adjacency",
-    threshold_pctiles: list = [33, 67],
+    threshold_pctiles: list = None,
 ) -> RadistatResult:
     """Compute the RADISTAT feature descriptor for a given image and feature.
 
@@ -58,7 +58,7 @@ def radistat(
     spatial_metric : {'adjacency', 'mst', 'delauney'}
         Which spatial_metric to be used.
 
-    threshold_pctiles : list[str]
+    threshold_pctiles : list[int]
         List of percentiles, between 0 and 100 inclusive, at which to threshold each bin.
         For example, [33, 67] will produce 3 bins of expression values,
         separated at the 33rd and 67th percentiles.
@@ -72,6 +72,9 @@ def radistat(
         )
     if not np.any(mask):
         raise ValueError("Mask is empty!")
+    # Default argument for threshold percentiles
+    if threshold_pctiles is None:
+        threshold_pctiles = [33, 67]
 
     feat_vals = feat_map[mask > 0]
 
@@ -125,3 +128,6 @@ def radistat(
     # Calculate the textural and spatial metrics
     print("Calculating RADISTAT metrics...", file=stderr)
     texture_vec = build_texture_vec(feat_vol, thresholds, texture_metric)
+    spatial_vec = build_spatial_vec(feat_vol, thresholds, spatial_metric)
+
+    print("done")
