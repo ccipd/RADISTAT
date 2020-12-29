@@ -3,6 +3,7 @@ from sys import stderr
 
 import numpy as np
 
+from skimage import segmentation
 from build_metrics import build_texture_vec, build_spatial_vec
 from slic_supervoxels import slic
 
@@ -15,7 +16,7 @@ class RadistatResult:
     cluster_values: np.ndarray
     expression_values: np.ndarray
     texture_vec: list
-    spatial_vec: list
+    spatial_vec: dict
 
 
 def radistat(
@@ -80,20 +81,7 @@ def radistat(
 
     # Get superpixels
     print("Computing superpixel clusters...\n", file=stderr)
-    # If image is 2D, tile the array so it's 3D
-    vol_supervoxel: np.ndarray
-    if len(img.shape) == 2:
-        step = (window_size, window_size, 1)
-        _, _, vol_supervoxel = slic(
-            np.tile(feat_vals, (1, 2)).transpose(),
-            np.tile(mask, (2, 1, 1)).transpose((1, 2, 0)),
-            step,
-            num_min_voxels,
-        )
-        vol_supervoxel = vol_supervoxel[:, :, 0]
-    else:
-        step = (window_size, window_size, window_size)
-        _, _, vol_supervoxel = slic(feat_map, mask, step, num_min_voxels)
+    vol_supervoxel = segmentation.slic(feat_map, mask=mask, spacing=(window_size, window_size, window_size))
 
     labeled_voxels = vol_supervoxel[mask > 0]
     # Fill each cluster with mean of all voxels in that cluster
@@ -115,9 +103,9 @@ def radistat(
             for i in range(cluster_vals.shape[0])
             if cluster_vals[i] <= thresh and expression_vals[i] == 0
         ]
-        expression_vals[cluster_idxs] = (idx + 1) / (len(threshold_vals) + 1)
+        expression_vals[cluster_idxs] = (idx + 1)
     # At this point, the remaining zeros in expresion_vals should go in the last bin
-    expression_vals[expression_vals == 0] = 1
+    expression_vals[expression_vals == 0] = len(threshold_vals) + 1
 
     # Create feature volume out of expression levels
     feat_vol = np.zeros(np.shape(mask))
@@ -130,4 +118,7 @@ def radistat(
     texture_vec = build_texture_vec(feat_vol, thresholds, texture_metric)
     spatial_vec = build_spatial_vec(feat_vol, thresholds, spatial_metric)
 
-    print("done")
+    return RadistatResult(
+
+    )
+
