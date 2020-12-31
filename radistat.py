@@ -81,7 +81,9 @@ def radistat(
 
     # Get superpixels
     print("Computing superpixel clusters...\n", file=stderr)
-    vol_supervoxel = segmentation.slic(feat_map, mask=mask, spacing=(window_size, window_size, window_size))
+    vol_supervoxel = segmentation.slic(
+        feat_map, mask=mask, spacing=(window_size, window_size, window_size)
+    )
 
     labeled_voxels = vol_supervoxel[mask > 0]
     # Fill each cluster with mean of all voxels in that cluster
@@ -103,7 +105,7 @@ def radistat(
             for i in range(cluster_vals.shape[0])
             if cluster_vals[i] <= thresh and expression_vals[i] == 0
         ]
-        expression_vals[cluster_idxs] = (idx + 1)
+        expression_vals[cluster_idxs] = idx + 1
     # At this point, the remaining zeros in expresion_vals should go in the last bin
     expression_vals[expression_vals == 0] = len(threshold_vals) + 1
 
@@ -119,6 +121,5 @@ def radistat(
     spatial_vec = build_spatial_vec(feat_vol, thresholds, spatial_metric)
 
     return RadistatResult(
-
+        vol_supervoxel, cluster_vals, expression_vals, texture_vec, spatial_vec
     )
-

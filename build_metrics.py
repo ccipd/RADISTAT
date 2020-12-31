@@ -7,7 +7,7 @@ from skimage.future import graph
 
 
 def build_texture_vec(
-        feat_vol: np.ndarray, thresholds: List[float], method: str = "prop"
+    feat_vol: np.ndarray, thresholds: List[float], method: str = "prop"
 ) -> Dict[Tuple[int, int], int]:
     """Compute the textural component of the RADISTAT metric.
 
@@ -77,7 +77,7 @@ def build_texture_vec(
 
 
 def build_spatial_vec(
-        feat_vol: np.ndarray, thresholds: List[int], graphstruct: str
+    feat_vol: np.ndarray, thresholds: List[int], graphstruct: str
 ) -> np.ndarray:
     """Compute the spatial component of the RADISTAT metric.
 
@@ -120,7 +120,7 @@ def build_spatial_vec(
     spatial_dict = {k: 0 for k in combinations(thresholds, 2)}
 
     # Define a quick lambda to get the expression level of a node
-    get_level = lambda n: int(rag.nodes[n]['mean color'][0])
+    get_level = lambda n: int(rag.nodes[n]["mean color"][0])
 
     # Iterate through and count adjacencies between expression levels
     for node, adj in rag.adjacency():
