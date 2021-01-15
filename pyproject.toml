@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "radistat-py"
+version = "0.1.0"
+description = "Python implementation of the RADISTAT algorithm"
+authors = ["Imran Hossain <imran@case.edu>"]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+numpy = "^1.18.1"
+scikit-image = "^0.16.2"
+simpleitk = "^1.2.4"
+pillow = "^7.0.0"
+jupyter = "^1.0.0"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
