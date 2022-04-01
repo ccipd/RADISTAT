@@ -1,6 +1,7 @@
 import SimpleITK as sitk
 
 from radistat import radistat
+import numpy as np
 
 if __name__ == "__main__":
     # Load in data
@@ -26,6 +27,8 @@ if __name__ == "__main__":
     mask = vol_mask[:, :, SLICE]
     featmap = vol_featmap[:, :, SLICE]
 
-    radistat(img, mask, featmap)
+    result = radistat(img, mask, featmap)
 
+    print(np.unique(result.supervoxel_labels))
+    print(result.spatial_vec)
     # TODO visualize results
