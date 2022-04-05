@@ -1,5 +1,5 @@
 jupyter
-scikit-image
+scikit-image==0.18.0
 scipy
 SimpleITK
 numpy
