@@ -1,4 +1,4 @@
-# RADIomic Spatial TexturAl descripTor: Python implemntation
+# RADIomic Spatial TexturAl descripTor: Python implementation
 
 RADISTAT is a radiomic feature descriptor that characterizes the spatial and
 textural heterogeneity of a given radiomic feature.
