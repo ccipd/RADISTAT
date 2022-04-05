@@ -2,7 +2,7 @@
 
 RADISTAT is a novel radiomic approach driven by the hypothesis that quantifying spatial organization of texture patterns within an ROI could allow for better capturing interactions between different tissue classes present in a given region; thus enabling more accurate characterization of disease or response phenotypes.
 
-Reference MATLAB and Python implementations of RADISTAT are provided.
+Reference MATLAB and Python implementations of RADISTAT are provided. Basic installation instructions for Python are also provided within the relevant subfolder.
 
 Further details can be found in the associated manuscript:
 
